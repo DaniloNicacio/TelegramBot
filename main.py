@@ -1,134 +1,164 @@
-import logging
+import telebot
+from dotenv import load_dotenv
+import os
+import yt_dlp
+import urllib.request
+import re
 
-from telegram import Update, ForceReply, InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
+load_dotenv()
+bot_token = os.getenv("BOT_TOKEN")
 
-logger = logging.getLogger(__name__)
+bot = telebot.TeleBot(bot_token)
 
-# Store bot screaming status
-screaming = False
+ydl_audio_opts = {
+    'format': 'bestaudio/best',
+    'postprocessors': [{
+        'key': 'FFmpegExtractAudio',
+        'preferredcodec': 'mp3',
+        'preferredquality': '192',
+    }],
+}
 
-# Pre-assign menu text
-FIRST_MENU = "<b>Menu 1</b>\n\nA beautiful menu with a shiny inline button."
-SECOND_MENU = "<b>Menu 2</b>\n\nA better menu with even more shiny inline buttons."
+ydl_video_opts = {
+    'format': 'bestvideo+bestaudio/best',
+    'postprocessors': [{
+        'key': 'FFmpegVideoConvertor',
+        'preferedformat': 'mp4',
+    }],
+}
 
-# Pre-assign button text
-NEXT_BUTTON = "Next"
-BACK_BUTTON = "Back"
-TUTORIAL_BUTTON = "Tutorial"
-
-# Build keyboards
-FIRST_MENU_MARKUP = InlineKeyboardMarkup([[
-    InlineKeyboardButton(NEXT_BUTTON, callback_data=NEXT_BUTTON)
-]])
-SECOND_MENU_MARKUP = InlineKeyboardMarkup([
-    [InlineKeyboardButton(BACK_BUTTON, callback_data=BACK_BUTTON)],
-    [InlineKeyboardButton(TUTORIAL_BUTTON, url="https://core.telegram.org/bots/api")]
-])
-
-
-def echo(update: Update, context: CallbackContext) -> None:
-    """
-    This function would be added to the dispatcher as a handler for messages coming from the Bot API
-    """
-
-    # Print to console
-    print(f'{update.message.from_user.first_name} wrote {update.message.text}')
-
-    if screaming and update.message.text:
-        context.bot.send_message(
-            update.message.chat_id,
-            update.message.text.upper(),
-            # To preserve the markdown, we attach entities (bold, italic...)
-            entities=update.message.entities
-        )
+def get_video_url(query):
+    if "youtube.com" in query or "youtu.be" in query:
+        url = query
     else:
-        # This is equivalent to forwarding, without the sender's name
-        update.message.copy(update.message.chat_id)
+        search_keyword = query.replace(" ", "+")
+        html = urllib.request.urlopen("https://www.youtube.com/results?search_query=" + search_keyword)
+        video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode())
+        if video_ids:
+            url = "https://www.youtube.com/watch?v=" + video_ids[0]
+        else:
+            url = None
+    return url
 
+def seconds_to_minutes(seconds):
+    minutes = seconds // 60
+    remaining_seconds = seconds % 60
+    return f"{minutes}:{remaining_seconds:02d}"
 
-def scream(update: Update, context: CallbackContext) -> None:
-    """
-    This function handles the /scream command
-    """
+def download_video(ydl_opts, url):
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        file_path = ydl.prepare_filename(info)
+        ydl.download([url])
+    
+    if ydl_opts == ydl_video_opts:
+        mp4_file_path = file_path.replace('.webm', '.mp4')
+        if os.path.exists(mp4_file_path):
+            video_name = info.get('title', 'Unknown')
+            duration_seconds = info.get('duration', 'Unknown')
+            duration_formatted = seconds_to_minutes(duration_seconds)
+            file_size = os.path.getsize(mp4_file_path)
+            file_size_mb = file_size / (1024 * 1024)
+            
+            return mp4_file_path, video_name, duration_formatted, file_size_mb
+        else:
+            return None, None, None, None
+    else:
+        mp3_file_path = file_path.replace('.webm', '.mp3')
+        if os.path.exists(mp3_file_path):
+            video_name = info.get('title', 'Unknown')
+            duration_seconds = info.get('duration', 'Unknown')
+            duration_formatted = seconds_to_minutes(duration_seconds)
+            file_size = os.path.getsize(mp3_file_path)
+            file_size_mb = file_size / (1024 * 1024)
+            
+            return mp3_file_path, video_name, duration_formatted, file_size_mb
+        else:
+            return None, None, None, None
 
-    global screaming
-    screaming = True
+def send_audio_messages(chat_id, audio_files):
+    for audio_file in audio_files:
+        with open(audio_file, 'rb') as audio:
+            bot.send_audio(chat_id, audio, timeout= 5000)
+        os.remove(audio_file)
 
+@bot.message_handler(commands=["downloadvideo"])
+def downloadvideo(message):
+    text = message.text.split(' ', 1)
+    if len(text) > 1:
+        video_url = text[1]
+        url = get_video_url(video_url)
+        info = yt_dlp.YoutubeDL().extract_info(url, download=False, process=False)
+        
+        if 'entries' in info:
+            bot.send_message(message.chat.id, "Please, do not put playlists url here, use /downloadaudio instead")
+        else:
+            bot.send_message(message.chat.id, "I'm downloading the video, please wait…\nNote: The waiting time may vary according to the size of the video.")
+            mp4_file_path, video_name, duration_formatted, file_size_mb = download_video(ydl_video_opts, url)
+            if mp4_file_path:
+                bot.send_message(message.chat.id, f"Here is the video:\nTitle: {video_name}\nDuration: {duration_formatted}\nFile Size: {file_size_mb:.2f} MB")
+                with open(mp4_file_path, 'rb') as video_file:
+                    bot.send_video(message.chat.id, video_file, timeout= 5000)
+                os.remove(mp4_file_path)
+            else:
+                bot.send_message(message.chat.id, "Timeout problem :/, please try again")
+                for file in os.listdir():
+                    if file.endswith(".webm"):
+                        os.remove(file)
+    else:
+        bot.send_message(message.chat.id, "Please provide the video URL or name. Example: /downloadvideo videourl")
 
-def whisper(update: Update, context: CallbackContext) -> None:
-    """
-    This function handles /whisper command
-    """
+@bot.message_handler(commands=["downloadaudio"])
+def downloadaudio(message):
+    text = message.text.split(' ', 1)
+    if len(text) > 1:
+        video_url = text[1]
+        bot.send_message(message.chat.id, "I'm downloading the audio, please wait…\nNote: The waiting time may vary according to the size of the video.")
+        url = get_video_url(video_url)
+        info = yt_dlp.YoutubeDL().extract_info(url, download=False, process=False)
+        
+        if 'entries' in info:
+            bot.send_message(message.chat.id, "Playlist detected. Downloading all audios in the playlist.")
+            audio_files = []
+            for entry in info['entries']:
+                audio_url = entry['url']
+                mp3_file_path, video_name, duration_formatted, file_size_mb = download_video(ydl_audio_opts, audio_url)
+                if mp3_file_path:
+                    audio_files.append(mp3_file_path)
+            send_audio_messages(message.chat.id, audio_files)
+            bot.send_message(message.chat.id, "All audios from the playlist have been downloaded.")
+        else:
+            # This is a single video
+            mp3_file_path, video_name, duration_formatted, file_size_mb = download_video(ydl_audio_opts, url)
+            if mp3_file_path:
+                bot.send_message(message.chat.id, f"Here is the audio:\nTitle: {video_name}\nDuration: {duration_formatted}\nFile Size: {file_size_mb:.2f} MB")
+                with open(mp3_file_path, 'rb') as audio_file:
+                    bot.send_audio(message.chat.id, audio_file, timeout= 5000)
+                os.remove(mp3_file_path)
+            else:
+                bot.send_message(message.chat.id, "Timeout problem :/, please try again")
+                for file in os.listdir():
+                    if file.endswith(".webm"):
+                        os.remove(file)
+    else:
+        bot.send_message(message.chat.id, "Please provide the video URL or name. Example: /downloadvideo videourl")
 
-    global screaming
-    screaming = False
+@bot.message_handler(commands=["start"])
+def send_hello(message):
+    bot.reply_to(message, 
+                 """
+                 Hello, i'am BotFofo! My function is download videos from youtube! Choose a option from bellow:\n
+/downloadvideo Download a video with the best quality possible\n
+/downloadaudio Download a audio from video with the best quality possible\n
+Note: Please, do not put videos with more than 1 hour duration, i can't handle videos with that size\n
+Do not put playlists url in video download command, i don't have support for this...\n
+But feel free to put in audio download command :)""")
+    
+def verify(message):
+    return True
 
+@bot.message_handler(func=verify)
+def reply(message):
+    bot.reply_to(message, "Hello how can i help you?")
 
-def menu(update: Update, context: CallbackContext) -> None:
-    """
-    This handler sends a menu with the inline buttons we pre-assigned above
-    """
-
-    context.bot.send_message(
-        update.message.from_user.id,
-        FIRST_MENU,
-        parse_mode=ParseMode.HTML,
-        reply_markup=FIRST_MENU_MARKUP
-    )
-
-
-def button_tap(update: Update, context: CallbackContext) -> None:
-    """
-    This handler processes the inline buttons on the menu
-    """
-
-    data = update.callback_query.data
-    text = ''
-    markup = None
-
-    if data == NEXT_BUTTON:
-        text = SECOND_MENU
-        markup = SECOND_MENU_MARKUP
-    elif data == BACK_BUTTON:
-        text = FIRST_MENU
-        markup = FIRST_MENU_MARKUP
-
-    # Close the query to end the client-side loading animation
-    update.callback_query.answer()
-
-    # Update message content with corresponding menu section
-    update.callback_query.message.edit_text(
-        text,
-        ParseMode.HTML,
-        reply_markup=markup
-    )
-
-
-def main() -> None:
-    updater = Updater("<YOUR_BOT_TOKEN_HERE>")
-
-    # Get the dispatcher to register handlers
-    # Then, we register each handler and the conditions the update must meet to trigger it
-    dispatcher = updater.dispatcher
-
-    # Register commands
-    dispatcher.add_handler(CommandHandler("scream", scream))
-    dispatcher.add_handler(CommandHandler("whisper", whisper))
-    dispatcher.add_handler(CommandHandler("menu", menu))
-
-    # Register handler for inline buttons
-    dispatcher.add_handler(CallbackQueryHandler(button_tap))
-
-    # Echo any message that is not a command
-    dispatcher.add_handler(MessageHandler(~Filters.command, echo))
-
-    # Start the Bot
-    updater.start_polling()
-
-    # Run the bot until you press Ctrl-C
-    updater.idle()
-
-
-if __name__ == '__main__':
-    main()
+bot.infinity_polling()
