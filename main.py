@@ -28,15 +28,17 @@ ydl_video_opts = {
     }],
 }
 
-# Helper function to get the YouTube video URL from a search query
 def get_video_url(query):
-    if "youtube.com" in query:
+    if "youtube.com" in query or "youtu.be" in query:
         url = query
     else:
         search_keyword = query.replace(" ", "+")
         html = urllib.request.urlopen("https://www.youtube.com/results?search_query=" + search_keyword)
         video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode())
-        url = "https://www.youtube.com/watch?v=" + video_ids[0]
+        if video_ids:
+            url = "https://www.youtube.com/watch?v=" + video_ids[0]
+        else:
+            url = None
     return url
 
 def seconds_to_minutes(seconds):
@@ -53,49 +55,57 @@ def download_video(ydl_opts, url):
     if ydl_opts == ydl_video_opts:
         mp4_file_path = file_path.replace('.webm', '.mp4')
         if os.path.exists(mp4_file_path):
-            # Getting video name, duration, and file size
             video_name = info.get('title', 'Unknown')
             duration_seconds = info.get('duration', 'Unknown')
             duration_formatted = seconds_to_minutes(duration_seconds)
             file_size = os.path.getsize(mp4_file_path)
-            file_size_mb = file_size / (1024 * 1024)  # Convert bytes to MB
+            file_size_mb = file_size / (1024 * 1024)
             
             return mp4_file_path, video_name, duration_formatted, file_size_mb
         else:
             return None, None, None, None
     else:
-        # For audio downloads, return the MP3 file path along with video name, duration, and file size
         mp3_file_path = file_path.replace('.webm', '.mp3')
         if os.path.exists(mp3_file_path):
             video_name = info.get('title', 'Unknown')
             duration_seconds = info.get('duration', 'Unknown')
             duration_formatted = seconds_to_minutes(duration_seconds)
             file_size = os.path.getsize(mp3_file_path)
-            file_size_mb = file_size / (1024 * 1024)  # Convert bytes to MB
+            file_size_mb = file_size / (1024 * 1024)
             
             return mp3_file_path, video_name, duration_formatted, file_size_mb
         else:
             return None, None, None, None
+
+def send_audio_messages(chat_id, audio_files):
+    for audio_file in audio_files:
+        with open(audio_file, 'rb') as audio:
+            bot.send_audio(chat_id, audio, timeout= 5000)
+        os.remove(audio_file)
 
 @bot.message_handler(commands=["downloadvideo"])
 def downloadvideo(message):
     text = message.text.split(' ', 1)
     if len(text) > 1:
         video_url = text[1]
-        bot.send_message(message.chat.id, "I'm downloading the video, please wait…\nNote: The waiting time may vary according to the size of the video.")
         url = get_video_url(video_url)
-        mp4_file_path, video_name, duration_formatted, file_size_mb = download_video(ydl_video_opts, url)
-
-        if mp4_file_path:
-            bot.send_message(message.chat.id, f"Here is the video:\nTitle: {video_name}\nDuration: {duration_formatted}\nFile Size: {file_size_mb:.2f} MB")
-            with open(mp4_file_path, 'rb') as video_file:
-                bot.send_video(message.chat.id, video_file, timeout= 5000)
-            os.remove(mp4_file_path)
+        info = yt_dlp.YoutubeDL().extract_info(url, download=False, process=False)
+        
+        if 'entries' in info:
+            bot.send_message(message.chat.id, "Please, do not put playlists url here, use /downloadaudio instead")
         else:
-            bot.send_message(message.chat.id, "Timeout problem :/, please try again")
-            for file in os.listdir():
-                if file.endswith(".webm"):
-                    os.remove(file)
+            bot.send_message(message.chat.id, "I'm downloading the video, please wait…\nNote: The waiting time may vary according to the size of the video.")
+            mp4_file_path, video_name, duration_formatted, file_size_mb = download_video(ydl_video_opts, url)
+            if mp4_file_path:
+                bot.send_message(message.chat.id, f"Here is the video:\nTitle: {video_name}\nDuration: {duration_formatted}\nFile Size: {file_size_mb:.2f} MB")
+                with open(mp4_file_path, 'rb') as video_file:
+                    bot.send_video(message.chat.id, video_file, timeout= 5000)
+                os.remove(mp4_file_path)
+            else:
+                bot.send_message(message.chat.id, "Timeout problem :/, please try again")
+                for file in os.listdir():
+                    if file.endswith(".webm"):
+                        os.remove(file)
     else:
         bot.send_message(message.chat.id, "Please provide the video URL or name. Example: /downloadvideo urldovideo")
 
@@ -106,18 +116,31 @@ def downloadaudio(message):
         video_url = text[1]
         bot.send_message(message.chat.id, "I'm downloading the audio, please wait…\nNote: The waiting time may vary according to the size of the video.")
         url = get_video_url(video_url)
-        mp3_file_path, video_name, duration_formatted, file_size_mb = download_video(ydl_audio_opts, url)
-
-        if mp3_file_path:
-            bot.send_message(message.chat.id, f"Here is the audio:\nTitle: {video_name}\nDuration: {duration_formatted}\nFile Size: {file_size_mb:.2f} MB")
-            with open(mp3_file_path, 'rb') as audio_file:
-                bot.send_audio(message.chat.id, audio_file, timeout= 5000)
-            os.remove(mp3_file_path)
+        info = yt_dlp.YoutubeDL().extract_info(url, download=False, process=False)
+        
+        if 'entries' in info:
+            bot.send_message(message.chat.id, "Playlist detected. Downloading all audios in the playlist.")
+            audio_files = []
+            for entry in info['entries']:
+                audio_url = entry['url']
+                mp3_file_path, video_name, duration_formatted, file_size_mb = download_video(ydl_audio_opts, audio_url)
+                if mp3_file_path:
+                    audio_files.append(mp3_file_path)
+            send_audio_messages(message.chat.id, audio_files)
+            bot.send_message(message.chat.id, "All audios from the playlist have been downloaded.")
         else:
-            bot.send_message(message.chat.id, "Timeout problem :/, please try again")
-            for file in os.listdir():
-                if file.endswith(".webm"):
-                    os.remove(file)
+            # This is a single video
+            mp3_file_path, video_name, duration_formatted, file_size_mb = download_video(ydl_audio_opts, url)
+            if mp3_file_path:
+                bot.send_message(message.chat.id, f"Here is the audio:\nTitle: {video_name}\nDuration: {duration_formatted}\nFile Size: {file_size_mb:.2f} MB")
+                with open(mp3_file_path, 'rb') as audio_file:
+                    bot.send_audio(message.chat.id, audio_file, timeout= 5000)
+                os.remove(mp3_file_path)
+            else:
+                bot.send_message(message.chat.id, "Timeout problem :/, please try again")
+                for file in os.listdir():
+                    if file.endswith(".webm"):
+                        os.remove(file)
     else:
         bot.send_message(message.chat.id, "Please provide the video URL or name. Example: /downloadvideo urldovideo")
 
@@ -127,7 +150,11 @@ def send_hello(message):
                  """
                  Hello, i'am BotFofo! My function is download videos from youtube! Choose a option from bellow:\n
 /downloadvideo Download a video with the best quality possible\n
-/downloadaudio Download a audio from video with the best quality possible""")
+/downloadaudio Download a audio from video with the best quality possible\n
+\n
+Note: Please, do not put videos with more than 1 hour duration, i can't handle videos with that size\n
+Do not put playlists url in video download command, i don't have support for this...\n
+But feel free to put in audio download command :)""")
     
 def verify(message):
     return True
