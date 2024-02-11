@@ -50,18 +50,32 @@ def download_video(ydl_opts, url):
         file_path = ydl.prepare_filename(info)
         ydl.download([url])
     
-    mp4_file_path = file_path.replace('.webm', '.mp4')
-    if os.path.exists(mp4_file_path):
-        # Getting video name, duration, and file size
-        video_name = info.get('title', 'Unknown')
-        duration_seconds = info.get('duration', 'Unknown')
-        duration_formatted = seconds_to_minutes(duration_seconds)
-        file_size = os.path.getsize(mp4_file_path)
-        file_size_mb = file_size / (1024 * 1024)  # Convert bytes to MB
-        
-        return mp4_file_path, video_name, duration_formatted, file_size_mb
+    if ydl_opts == ydl_video_opts:
+        mp4_file_path = file_path.replace('.webm', '.mp4')
+        if os.path.exists(mp4_file_path):
+            # Getting video name, duration, and file size
+            video_name = info.get('title', 'Unknown')
+            duration_seconds = info.get('duration', 'Unknown')
+            duration_formatted = seconds_to_minutes(duration_seconds)
+            file_size = os.path.getsize(mp4_file_path)
+            file_size_mb = file_size / (1024 * 1024)  # Convert bytes to MB
+            
+            return mp4_file_path, video_name, duration_formatted, file_size_mb
+        else:
+            return None, None, None, None
     else:
-        return None, None, None, None
+        # For audio downloads, return the MP3 file path along with video name, duration, and file size
+        mp3_file_path = file_path.replace('.webm', '.mp3')
+        if os.path.exists(mp3_file_path):
+            video_name = info.get('title', 'Unknown')
+            duration_seconds = info.get('duration', 'Unknown')
+            duration_formatted = seconds_to_minutes(duration_seconds)
+            file_size = os.path.getsize(mp3_file_path)
+            file_size_mb = file_size / (1024 * 1024)  # Convert bytes to MB
+            
+            return mp3_file_path, video_name, duration_formatted, file_size_mb
+        else:
+            return None, None, None, None
 
 @bot.message_handler(commands=["downloadvideo"])
 def downloadvideo(message):
@@ -73,10 +87,32 @@ def downloadvideo(message):
         mp4_file_path, video_name, duration_formatted, file_size_mb = download_video(ydl_video_opts, url)
 
         if mp4_file_path:
-            bot.send_message(message.chat.id, f"Here is the video:\nTitle: {video_name}\Duration: {duration_formatted}\nFile Size: {file_size_mb:.2f} MB")
+            bot.send_message(message.chat.id, f"Here is the video:\nTitle: {video_name}\nDuration: {duration_formatted}\nFile Size: {file_size_mb:.2f} MB")
             with open(mp4_file_path, 'rb') as video_file:
                 bot.send_video(message.chat.id, video_file, timeout= 5000)
             os.remove(mp4_file_path)
+        else:
+            bot.send_message(message.chat.id, "Timeout problem :/, please try again")
+            for file in os.listdir():
+                if file.endswith(".webm"):
+                    os.remove(file)
+    else:
+        bot.send_message(message.chat.id, "Please provide the video URL or name. Example: /downloadvideo urldovideo")
+
+@bot.message_handler(commands=["downloadaudio"])
+def downloadaudio(message):
+    text = message.text.split(' ', 1)
+    if len(text) > 1:
+        video_url = text[1]
+        bot.send_message(message.chat.id, "I'm downloading the audio, please wait…\nNote: The waiting time may vary according to the size of the video.")
+        url = get_video_url(video_url)
+        mp3_file_path, video_name, duration_formatted, file_size_mb = download_video(ydl_audio_opts, url)
+
+        if mp3_file_path:
+            bot.send_message(message.chat.id, f"Here is the audio:\nTitle: {video_name}\nDuration: {duration_formatted}\nFile Size: {file_size_mb:.2f} MB")
+            with open(mp3_file_path, 'rb') as audio_file:
+                bot.send_audio(message.chat.id, audio_file, timeout= 5000)
+            os.remove(mp3_file_path)
         else:
             bot.send_message(message.chat.id, "Timeout problem :/, please try again")
             for file in os.listdir():
