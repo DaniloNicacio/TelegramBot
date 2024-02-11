@@ -1,4 +1,3 @@
-import time
 import telebot
 from dotenv import load_dotenv
 import os
@@ -107,7 +106,7 @@ def downloadvideo(message):
                     if file.endswith(".webm"):
                         os.remove(file)
     else:
-        bot.send_message(message.chat.id, "Please provide the video URL or name. Example: /downloadvideo urldovideo")
+        bot.send_message(message.chat.id, "Please provide the video URL or name. Example: /downloadvideo videourl")
 
 @bot.message_handler(commands=["downloadaudio"])
 def downloadaudio(message):
@@ -142,7 +141,7 @@ def downloadaudio(message):
                     if file.endswith(".webm"):
                         os.remove(file)
     else:
-        bot.send_message(message.chat.id, "Please provide the video URL or name. Example: /downloadvideo urldovideo")
+        bot.send_message(message.chat.id, "Please provide the video URL or name. Example: /downloadvideo videourl")
 
 @bot.message_handler(commands=["start"])
 def send_hello(message):
@@ -151,7 +150,6 @@ def send_hello(message):
                  Hello, i'am BotFofo! My function is download videos from youtube! Choose a option from bellow:\n
 /downloadvideo Download a video with the best quality possible\n
 /downloadaudio Download a audio from video with the best quality possible\n
-\n
 Note: Please, do not put videos with more than 1 hour duration, i can't handle videos with that size\n
 Do not put playlists url in video download command, i don't have support for this...\n
 But feel free to put in audio download command :)""")
