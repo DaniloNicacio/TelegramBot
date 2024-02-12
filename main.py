@@ -147,7 +147,7 @@ def downloadaudio(message):
 def send_hello(message):
     bot.reply_to(message, 
                  """
-                 Hello, i'am BotFofo! My function is download videos from youtube! Choose a option from bellow:\n
+                 Hello, i'am CuteBotYTD! My function is download videos from youtube! Choose a option from bellow:\n
 /downloadvideo Download a video with the best quality possible\n
 /downloadaudio Download a audio from video with the best quality possible\n
 Note: Please, do not put videos with more than 1 hour duration, i can't handle videos with that size\n
